@@ -55,6 +55,9 @@ import java.util.concurrent.Future;
  * <p>
  * The {@link FlushConsolidationHandler} should be put as first {@link ChannelHandler} in the
  * {@link ChannelPipeline} to have the best effect.
+ *
+ * 一个增强写的实现，目的在于减少flush的调用次数，提升吞吐量
+ * 尽量在channelReadComplete的时候flush，或者达到设置的阈值时flush，最后选择延迟flush任务
  */
 public class FlushConsolidationHandler extends ChannelDuplexHandler {
     private final int explicitFlushAfterFlushes;
@@ -123,10 +126,12 @@ public class FlushConsolidationHandler extends ChannelDuplexHandler {
         if (readInProgress) {
             // If there is still a read in progress we are sure we will see a channelReadComplete(...) call. Thus
             // we only need to flush if we reach the explicitFlushAfterFlushes limit.
+            // 如果正在读数据，那么以后肯定会触发channelReadComplete，没达到explicitFlushAfterFlushes阈值时仅仅计数，达到阈值后触发flush
             if (++flushPendingCount == explicitFlushAfterFlushes) {
                 flushNow(ctx);
             }
         } else if (consolidateWhenNoReadInProgress) {
+            // 如果没有新数据了，channelReadComplete不再被触发，达到阈值flush或者提交一个flush的任务（还是延迟flush）
             // Flush immediately if we reach the threshold, otherwise schedule
             if (++flushPendingCount == explicitFlushAfterFlushes) {
                 flushNow(ctx);

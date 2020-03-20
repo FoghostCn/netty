@@ -23,6 +23,8 @@ import java.nio.channels.Selector;
  * An arbitrary task that can be executed by {@link NioEventLoop} when a {@link SelectableChannel} becomes ready.
  *
  * @see NioEventLoop#register(SelectableChannel, int, NioTask)
+ *
+ * 允许用户自己定义内容到channel上， netty本身并没有用到
  */
 public interface NioTask<C extends SelectableChannel> {
     /**

@@ -42,6 +42,7 @@ import static java.lang.Math.min;
 /**
  * (Transport implementors only) an internal data structure used by {@link AbstractChannel} to store its pending
  * outbound write requests.
+ * channel 写数据缓冲区，ctx.write()会写入到这个缓冲区，执行flush时将缓冲区的数据真正写入到远程
  * <p>
  * All methods must be called by a transport implementation from an I/O thread, except the following ones:
  * <ul>
@@ -76,12 +77,17 @@ public final class ChannelOutboundBuffer {
     // Entry(flushedEntry) --> ... Entry(unflushedEntry) --> ... Entry(tailEntry)
     //
     // The Entry that is the first in the linked-list structure that was flushed
+    /**
+     * Entry的结构是Entry(flushedEntry) --> ... Entry(unflushedEntry) --> ... Entry(tailEntry)
+     * ，是一个单项链表，所以flushedEntry、unflushedEntry、tailEntry都是这个链表上的一个位置而已
+     * flushedEntry是正在写入网络的数据entry
+    */
     private Entry flushedEntry;
     // The Entry which is the first unflushed in the linked-list structure
     private Entry unflushedEntry;
     // The Entry which represents the tail of the buffer
     private Entry tailEntry;
-    // The number of flushed entries that are not written yet
+    // The number of flushed entries that are not written yet 已标记为flush但还没真正写入网络的entry个数
     private int flushed;
 
     private int nioBufferCount;
@@ -92,6 +98,9 @@ public final class ChannelOutboundBuffer {
     private static final AtomicLongFieldUpdater<ChannelOutboundBuffer> TOTAL_PENDING_SIZE_UPDATER =
             AtomicLongFieldUpdater.newUpdater(ChannelOutboundBuffer.class, "totalPendingSize");
 
+    /**
+     * 待flush的entry字节数大小，指的是unflushedEntry之后的所有节点的数据，包含真实数据和entry自身所占的内存大小之和
+     */
     @SuppressWarnings("UnusedDeclaration")
     private volatile long totalPendingSize;
 
@@ -110,6 +119,8 @@ public final class ChannelOutboundBuffer {
     /**
      * Add given message to this {@link ChannelOutboundBuffer}. The given {@link ChannelPromise} will be notified once
      * the message was written.
+     * 将ctx.write的数据放到缓冲区ChannelOutBoundBuffer，回调的promise在数据被真正写入数据链路时才被通知
+     * 这个数据会放在链表的最后，然后将tail指向这个节点
      */
     public void addMessage(Object msg, int size, ChannelPromise promise) {
         Entry entry = Entry.newInstance(msg, size, total(msg), promise);
@@ -120,6 +131,7 @@ public final class ChannelOutboundBuffer {
             tail.next = entry;
         }
         tailEntry = entry;
+        // unflushedEntry指向的是第一个未标记要flush的节点，他后边的节点都是未flush的数据
         if (unflushedEntry == null) {
             unflushedEntry = entry;
         }
@@ -132,6 +144,7 @@ public final class ChannelOutboundBuffer {
     /**
      * Add a flush to this {@link ChannelOutboundBuffer}. This means all previous added messages are marked as flushed
      * and so you will be able to handle them.
+     * Entry的结构是Entry(flushedEntry) --> ... Entry(unflushedEntry) --> ... Entry(tailEntry)，是一个单项链表
      */
     public void addFlush() {
         // There is no need to process all entries if there was already a flush before and no new messages
@@ -212,6 +225,7 @@ public final class ChannelOutboundBuffer {
 
     /**
      * Return the current message to write or {@code null} if nothing was flushed before and so is ready to be written.
+     * 正在写入网络的entry
      */
     public Object current() {
         Entry entry = flushedEntry;
@@ -407,13 +421,17 @@ public final class ChannelOutboundBuffer {
         final InternalThreadLocalMap threadLocalMap = InternalThreadLocalMap.get();
         ByteBuffer[] nioBuffers = NIO_BUFFERS.get(threadLocalMap);
         Entry entry = flushedEntry;
+        // 由于这里是循环遍历，所以这里要挨个判断是不是unFlushedEntry，如果是就不用往下遍历了，后边的entry还未设置flush
         while (isFlushedEntry(entry) && entry.msg instanceof ByteBuf) {
+            // 没有被取消
             if (!entry.cancelled) {
                 ByteBuf buf = (ByteBuf) entry.msg;
                 final int readerIndex = buf.readerIndex();
                 final int readableBytes = buf.writerIndex() - readerIndex;
 
                 if (readableBytes > 0) {
+                    // maxBytes < readableBytes + nioBufferSize 可读取的字节数，不能超过 maxBytes,
+                    // nioBufferCount != 0 不是第一次循环开始，否则无法读取
                     if (maxBytes - readableBytes < nioBufferSize && nioBufferCount != 0) {
                         // If the nioBufferSize + readableBytes will overflow maxBytes, and there is at least one entry
                         // we stop populate the ByteBuffer array. This is done for 2 reasons:

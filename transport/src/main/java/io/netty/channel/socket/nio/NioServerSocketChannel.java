@@ -58,6 +58,10 @@ public class NioServerSocketChannel extends AbstractNioMessageChannel
              *  {@link SelectorProvider#provider()} which is called by each ServerSocketChannel.open() otherwise.
              *
              *  See <a href="https://github.com/netty/netty/issues/2308">#2308</a>.
+             *
+             *  SelectorProvider#provider()方法存在同步代码块，每次new一个NioServerSocketChannel都要走一遍这个同步代码块会有大约
+             *  1%的性能损耗，所以这里改为了将SelectorProvider#provider()改为静态成员变量DEFAULT_SELECTOR_PROVIDER初始化的方式
+             *  其他的SelectableChannel也有同样的问题，详见{@link NioDatagramChannel}、{@link NioSocketChannel}
              */
             return provider.openServerSocketChannel();
         } catch (IOException e) {
@@ -86,6 +90,7 @@ public class NioServerSocketChannel extends AbstractNioMessageChannel
      * Create a new instance using the given {@link ServerSocketChannel}.
      */
     public NioServerSocketChannel(ServerSocketChannel channel) {
+        // 真正设置监听新连接的事件在这里
         super(null, channel, SelectionKey.OP_ACCEPT);
         config = new NioServerSocketChannelConfig(this, javaChannel().socket());
     }
@@ -142,6 +147,9 @@ public class NioServerSocketChannel extends AbstractNioMessageChannel
         javaChannel().close();
     }
 
+    /**
+     * 这里其实在接受新连接，buf中存储的是新的{@link NioSocketChannel}
+     */
     @Override
     protected int doReadMessages(List<Object> buf) throws Exception {
         SocketChannel ch = SocketUtils.accept(javaChannel());

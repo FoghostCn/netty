@@ -129,6 +129,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         if (executor == null) {
             return channel().eventLoop();
         } else {
+            // 在添加handler的时候有可能指定了executor
             return executor;
         }
     }
@@ -488,6 +489,8 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         if (executor.inEventLoop()) {
             next.invokeBind(localAddress, promise);
         } else {
+            // 这个safeExecute非executor中的safeExecute，这里都会将状态设置到promise中，不会只打印错误日志
+            // 对比 {@link io.netty.util.concurrent.AbstractEventExecutor#safeExecute}
             safeExecute(executor, new Runnable() {
                 @Override
                 public void run() {
@@ -499,6 +502,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     }
 
     private void invokeBind(SocketAddress localAddress, ChannelPromise promise) {
+        // 判断当前ctx的状态是否合法
         if (invokeHandler()) {
             try {
                 ((ChannelOutboundHandler) handler()).bind(this, localAddress, promise);
@@ -506,6 +510,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
                 notifyOutboundHandlerException(t, promise);
             }
         } else {
+            // 这里会交给pipeline的下一个符合条件的outBoundHandlerCtx处理
             bind(localAddress, promise);
         }
     }
@@ -805,13 +810,14 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     public ChannelFuture writeAndFlush(Object msg) {
         return writeAndFlush(msg, newPromise());
     }
-
+    // 设置promise失败，如果是VoidChannelPromise则什么都不干，注意这里不会将事件发送到pipeline链上，用这个方法的都是outbound
     private static void notifyOutboundHandlerException(Throwable cause, ChannelPromise promise) {
         // Only log if the given promise is not of type VoidChannelPromise as tryFailure(...) is expected to return
         // false.
         PromiseNotificationUtil.tryFailure(promise, cause, promise instanceof VoidChannelPromise ? null : logger);
     }
-
+    // 通知异常，并沿着pipeline传播直到被处理或者到达tail，用这个方法的主要是inbound方法
+    // 特殊的一点是read和flush也会使用这个方法传播错误，即使他俩是outbound
     private void notifyHandlerException(Throwable cause) {
         if (inExceptionCaught(cause)) {
             if (logger.isWarnEnabled()) {
@@ -903,7 +909,10 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         }
         return false;
     }
-
+    /**
+     * 找到pipeline的下一个inbound，如果不调用ctx.xxx(inbound)事件会提前终止，
+     * 调用ctx.xxx(outbound)事件会从当前ctx(也就是handler)掉头向前传播
+    */
     private AbstractChannelHandlerContext findContextInbound(int mask) {
         AbstractChannelHandlerContext ctx = this;
         do {
@@ -912,6 +921,9 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         return ctx;
     }
 
+    /**
+     * 找到pipeline的上一个outbound，并从当前ctx掉头向前传播，而不是从tail传播
+     */
     private AbstractChannelHandlerContext findContextOutbound(int mask) {
         AbstractChannelHandlerContext ctx = this;
         do {
@@ -943,7 +955,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
             }
         }
     }
-
+    // 设置当前ctx为正在添加中
     final void setAddPending() {
         boolean updated = HANDLER_STATE_UPDATER.compareAndSet(this, INIT, ADD_PENDING);
         assert updated; // This should always be true as it MUST be called before setAddComplete() or setRemoved().
@@ -976,9 +988,10 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
      * If this method returns {@code false} we will not invoke the {@link ChannelHandler} but just forward the event.
      * This is needed as {@link DefaultChannelPipeline} may already put the {@link ChannelHandler} in the linked-list
      * but not called {@link ChannelHandler#handlerAdded(ChannelHandlerContext)}.
+     * 检查当前handler是否已经添加进pipeline了
      */
     private boolean invokeHandler() {
-        // Store in local variable to reduce volatile reads.
+        // Store in local variable to reduce volatile reads.缓存到本地变量减少读取volatile变量的次数（成本高）
         int handlerState = this.handlerState;
         return handlerState == ADD_COMPLETE || (!ordered && handlerState == ADD_PENDING);
     }
@@ -998,6 +1011,10 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         return channel().hasAttr(key);
     }
 
+    /**
+     * 这个safeExecute非executor中的safeExecute，这里都会将状态设置到promise中，不会只打印错误日志
+     *  对比 {@link io.netty.util.concurrent.AbstractEventExecutor#safeExecute(Runnable)}
+     */
     private static boolean safeExecute(EventExecutor executor, Runnable runnable,
             ChannelPromise promise, Object msg, boolean lazy) {
         try {

@@ -499,6 +499,9 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
                 // Ensure we call handlerAdded(...) before we actually notify the promise. This is needed as the
                 // user may already fire events through the pipeline in the ChannelFutureListener.
+                // 触发handlerAdd或者handlerRemove事件，这些事件是channel未注册前添加的，注册后添加的会当场触发
+                // TODO 没太明白，这里应该是个补偿机制，在 pipeline.fireChannelRegistered()中也会触发，
+                //  触发一次后任务队列会被清空，所以不会重复触发
                 pipeline.invokeHandlerAddedIfNeeded();
 
                 safeSetSuccess(promise);
@@ -547,6 +550,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
             boolean wasActive = isActive();
             try {
+                // doBind是个同步方法,这里只要执行doBind没有异常即是成功
                 doBind(localAddress);
             } catch (Throwable t) {
                 safeSetFailure(promise, t);
@@ -558,6 +562,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 invokeLater(new Runnable() {
                     @Override
                     public void run() {
+                        // 如果ifAutoRead=true(默认)，pipeline的head中设置了自动监听读取事件
                         pipeline.fireChannelActive();
                     }
                 });
@@ -900,18 +905,19 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
         @SuppressWarnings("deprecation")
         protected void flush0() {
             if (inFlush0) {
-                // Avoid re-entrance
+                // Avoid re-entrance， 已经flush中
                 return;
             }
 
             final ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
             if (outboundBuffer == null || outboundBuffer.isEmpty()) {
+                // 没有数据可flush
                 return;
             }
-
+            // 设置flush进行中标志
             inFlush0 = true;
 
-            // Mark all pending write requests as failure if the channel is inactive.
+            // Mark all pending write requests as failure if the channel is inactive. 非活动链接
             if (!isActive()) {
                 try {
                     if (isOpen()) {
@@ -927,6 +933,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             }
 
             try {
+                // 由子类实现具体的写入逻辑,ServerChannel一般不支持
                 doWrite(outboundBuffer);
             } catch (Throwable t) {
                 if (t instanceof IOException && config().isAutoClose()) {
@@ -949,6 +956,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                     }
                 }
             } finally {
+                // flush结束
                 inFlush0 = false;
             }
         }
@@ -1108,11 +1116,13 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
     /**
      * Schedule a read operation.
+     * 接受新连接（对于ServerChannel），读取数据（对于SocketChannel）
      */
     protected abstract void doBeginRead() throws Exception;
 
     /**
      * Flush the content of the given buffer to the remote peer.
+     * 具体的写入逻辑抽象方法，包括oio和nio
      */
     protected abstract void doWrite(ChannelOutboundBuffer in) throws Exception;
 

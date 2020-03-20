@@ -147,9 +147,10 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                     byteBuf = allocHandle.allocate(allocator);
                     allocHandle.lastBytesRead(doReadBytes(byteBuf));
                     if (allocHandle.lastBytesRead() <= 0) {
-                        // nothing was read. release the buffer.
+                        // nothing was read. release the buffer. 没有数据可读
                         byteBuf.release();
                         byteBuf = null;
+                        // 读取的字节数为负数，EOF，对方已关闭
                         close = allocHandle.lastBytesRead() < 0;
                         if (close) {
                             // There is nothing left to read as we received an EOF.
@@ -160,6 +161,9 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
 
                     allocHandle.incMessagesRead(1);
                     readPending = false;
+                    // ChannelInboundHandler#fireChannelRead使用完字节码后需要释放，
+                    // 也可以继承SimpleChannelInboundHandler自动释放，
+                    // 如果最后字节码到达了TailContext也会自动释放，见TailContext#channelRead
                     pipeline.fireChannelRead(byteBuf);
                     byteBuf = null;
                 } while (allocHandle.continueReading());
@@ -260,7 +264,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
             }
             writeSpinCount -= doWriteInternal(in, msg);
         } while (writeSpinCount > 0);
-
+        // 数据还没写完，提交继续写的任务到eventloop或者监听OP_WRITE事件
         incompleteWrite(writeSpinCount < 0);
     }
 
@@ -283,6 +287,9 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                 "unsupported message type: " + StringUtil.simpleClassName(msg) + EXPECTED_TYPES);
     }
 
+    /**
+     * 数据一次未写完，设置对OP_WRITE时间感兴趣，待OP_WRITE事件激活时再写入，或者直接提交任务到eventloop下次写入
+     */
     protected final void incompleteWrite(boolean setOpWrite) {
         // Did not write completely.
         if (setOpWrite) {

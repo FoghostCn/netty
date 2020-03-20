@@ -63,6 +63,7 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
         public void read() {
             assert eventLoop().inEventLoop();
             final ChannelConfig config = config();
+            // 这里的pipeline是serverSockerChannel的pipeline，触发的也是serverBootstrap中绑定的handler，而不是childHandler
             final ChannelPipeline pipeline = pipeline();
             final RecvByteBufAllocator.Handle allocHandle = unsafe().recvBufAllocHandle();
             allocHandle.reset(config);
@@ -72,16 +73,19 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
             try {
                 try {
                     do {
+                        // 接受新连接readBuf里面是新连接，如NioSocketChannel
                         int localRead = doReadMessages(readBuf);
                         if (localRead == 0) {
                             break;
                         }
+                        // {@link NioServerSocketChannel.doReadMessages}只会返回0和1
                         if (localRead < 0) {
                             closed = true;
                             break;
                         }
 
                         allocHandle.incMessagesRead(localRead);
+                        // 循环读取 TODO 判断依据， NioServerSocketChannel只会返回false
                     } while (allocHandle.continueReading());
                 } catch (Throwable t) {
                     exception = t;
@@ -90,6 +94,8 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
                 int size = readBuf.size();
                 for (int i = 0; i < size; i ++) {
                     readPending = false;
+                    // 这里触发的是serverBootstrap中绑定的handler，而不是childHandler，这里会通过ServerBootstrapAcceptor将
+                    // 子channel注册到eventloop上
                     pipeline.fireChannelRead(readBuf.get(i));
                 }
                 readBuf.clear();
@@ -194,7 +200,7 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
 
     /**
      * Write a message to the underlying {@link java.nio.channels.Channel}.
-     *
+     * ServerChannel一般不支持这个操作，这个主要是nio的客户端Channel使用
      * @return {@code true} if and only if the message has been written
      */
     protected abstract boolean doWriteMessage(Object msg, ChannelOutboundBuffer in) throws Exception;

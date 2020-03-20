@@ -51,6 +51,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
             InternalLoggerFactory.getInstance(AbstractNioChannel.class);
 
     private final SelectableChannel ch;
+    // 这个Op对于socketChannel来说是OP_READ，如果是ServerSocketChannel则是OP_ACCEPT
     protected final int readInterestOp;
     volatile SelectionKey selectionKey;
     boolean readPending;
@@ -302,6 +303,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
             // Regardless if the connection attempt was cancelled, channelActive() event should be triggered,
             // because what happened is what happened.
             if (!wasActive && active) {
+                // active中会触发read，对于serverSocket来说read就是获取新连接
                 pipeline().fireChannelActive();
             }
 
@@ -332,6 +334,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
             try {
                 boolean wasActive = isActive();
                 doFinishConnect();
+                // 触发pipeline
                 fulfillConnectPromise(connectPromise, wasActive);
             } catch (Throwable t) {
                 fulfillConnectPromise(connectPromise, annotateConnectException(t, requestedRemoteAddress));
@@ -345,11 +348,16 @@ public abstract class AbstractNioChannel extends AbstractChannel {
             }
         }
 
+        /**
+         * 如果再等待flush则不立即执行flush，因为执行了也是等待，不如等OP_WRITE来了一起flush
+         */
         @Override
         protected final void flush0() {
             // Flush immediately only when there's no pending flush.
             // If there's a pending flush operation, event loop will call forceFlush() later,
             // and thus there's no need to call it now.
+            // 如果没有正在等待flush则立即执行flush，如果有等待flush的数据(上次没有flush完)则会监听OP_WRITE事件，
+            // 事件触发后会自动flush，详见{@link NioEventLoop#processSelectedKey(SelectionKey, AbstractNioChannel)}
             if (!isFlushPending()) {
                 super.flush0();
             }
@@ -377,6 +385,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
         boolean selected = false;
         for (;;) {
             try {
+                // 初始注册的时候没有监听任何事件，真正的事件监听在doBeginRead方法
                 selectionKey = javaChannel().register(eventLoop().unwrappedSelector(), 0, this);
                 return;
             } catch (CancelledKeyException e) {
@@ -408,7 +417,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
         }
 
         readPending = true;
-
+        // 如果是ServerSocketChannel这里的readInterestOp是OP_ACCEPT，如果是SocketChannel则是OP_READ
         final int interestOps = selectionKey.interestOps();
         if ((interestOps & readInterestOp) == 0) {
             selectionKey.interestOps(interestOps | readInterestOp);

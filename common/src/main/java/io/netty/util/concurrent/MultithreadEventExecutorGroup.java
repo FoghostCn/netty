@@ -27,6 +27,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Abstract base class for {@link EventExecutorGroup} implementations that handles their tasks with multiple threads at
  * the same time.
+ * 这个类是多线程执行器的默认实现，保留了一个newChild方法给自类扩展，也就是说具体的子执行器交给子类来选择，其他的都是默认实现
+ * 提供了一个默认的线程工厂类 ThreadFactory
  */
 public abstract class MultithreadEventExecutorGroup extends AbstractEventExecutorGroup {
 
@@ -81,7 +83,7 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
         for (int i = 0; i < nThreads; i ++) {
             boolean success = false;
             try {
-                children[i] = newChild(executor, args);
+                children[i] = newChild(executor, args); // newChild由子类实现
                 success = true;
             } catch (Exception e) {
                 // TODO: Think about if this is a good exception type
@@ -109,7 +111,7 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
         }
 
         chooser = chooserFactory.newChooser(children);
-
+        // 设置terminationFuture关联子线程的terminationFuture，所有子线程都关闭成功了这里的terminationFuture才成功
         final FutureListener<Object> terminationListener = new FutureListener<Object>() {
             @Override
             public void operationComplete(Future<Object> future) throws Exception {
@@ -160,8 +162,10 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
     @Override
     public Future<?> shutdownGracefully(long quietPeriod, long timeout, TimeUnit unit) {
         for (EventExecutor l: children) {
+            // 每个线程里面在启动线程的时候也将terminationFuture设置好了
             l.shutdownGracefully(quietPeriod, timeout, unit);
         }
+        // eventloopgroup在初始化的时候已经把terminationFuture关联到了每个子线程的terminationFuture上，这里不用处理，详见构造函数
         return terminationFuture();
     }
 

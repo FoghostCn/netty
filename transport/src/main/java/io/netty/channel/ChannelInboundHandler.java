@@ -18,6 +18,8 @@ package io.netty.channel;
 /**
  * {@link ChannelHandler} which adds callbacks for state changes. This allows the user
  * to hook in to state changes easily.
+ * 这个主要是用于被动事件通知，非用户直接发起的事件，异常会传播到pipeline上，发起者是unsafe
+ * 处理链条是pipeline的head到tail
  */
 public interface ChannelInboundHandler extends ChannelHandler {
 
@@ -44,6 +46,7 @@ public interface ChannelInboundHandler extends ChannelHandler {
 
     /**
      * Invoked when the current {@link Channel} has read a message from the peer.
+     * ChannelInboundHandler#fireChannelRead使用完字节码后需要释放,也可以继承SimpleChannelInboundHandler自动释放
      */
     void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception;
 

@@ -193,6 +193,8 @@ public interface ChannelHandler {
      *
      * @deprecated if you want to handle this event you should implement {@link ChannelInboundHandler} and
      * implement the method there.
+     * inbound异常会沿着pipeline传播，outbound并不会，因为outbound会返回promise，监听promise即可获取成功与否，没必要传播
+     * 所以这里标记废弃，在inbound中加入了这个方法，outbound并不需要这个方法
      */
     @Deprecated
     void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception;
@@ -208,6 +210,8 @@ public interface ChannelHandler {
      * <p>
      * This annotation is provided for documentation purpose, just like
      * <a href="http://www.javaconcurrencyinpractice.com/annotations/doc/">the JCIP annotations</a>.
+     * 需要注意的是这个注解只能代表被注解的类是可以共享的，netty并不会帮你缓存这个类来重复使用，需要自己控制对象的创建，
+     * 如果每次都new一个对象来用netty也不会帮你优化
      */
     @Inherited
     @Documented

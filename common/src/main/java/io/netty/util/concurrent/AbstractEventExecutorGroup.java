@@ -28,6 +28,7 @@ import static io.netty.util.concurrent.AbstractEventExecutor.*;
 
 /**
  * Abstract base class for {@link EventExecutorGroup} implementations.
+ * 这个类直接把相关任务委托给了next方法选中的EventExecutor去执行了，基本属于占坑的默认实现
  */
 public abstract class AbstractEventExecutorGroup implements EventExecutorGroup {
     @Override

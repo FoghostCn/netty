@@ -141,7 +141,11 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
                 if (handler != null) {
                     pipeline.addLast(handler);
                 }
-
+                // ServerBootstrapAcceptor添加延期执行的原因是用户可能用ChannelInitializer作为handler，这时用户真正想要添加的
+                // handler会在它的initChannel方法执行后才被添加进去，如果这里直接将ServerBootstrapAcceptor添加进去会导致用户的
+                // handler被放在了ServerBootstrapAcceptor之后，事件就接受不到了，ServerBootstrapAcceptor的channelRead没有
+                // 继续传播事件，大多数时候ServerBootstrapAcceptor应该放在最后
+                // https://github.com/lightningMan/netty/commit/4638df20628a8987c8709f0f8e5f3679a914ce1a
                 ch.eventLoop().execute(new Runnable() {
                     @Override
                     public void run() {
@@ -195,11 +199,16 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
             };
         }
 
+        /**
+         * 收到新连接，将childHandler添加到新链接的pipeline，将新连接注册到childEventLoopGroup上
+         */
         @Override
         @SuppressWarnings("unchecked")
         public void channelRead(ChannelHandlerContext ctx, Object msg) {
             final Channel child = (Channel) msg;
 
+            //这里如果childHandler是 {@link ChannelInitializer} 的话会在handlerAdded事件中执行
+            //{@link ChannelInitializer#initChannel(Channel)}方法中的代码并将ChannelInitializer本身移除掉
             child.pipeline().addLast(childHandler);
 
             setChannelOptions(child, childOptions, logger);
@@ -228,6 +237,7 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
             final ChannelConfig config = ctx.channel().config();
             if (config.isAutoRead()) {
+                // Too many open files causes tight loop, no recovery,文件描述符过多时无法恢复
                 // stop accept new connections for 1 second to allow the channel to recover
                 // See https://github.com/netty/netty/issues/1328
                 config.setAutoRead(false);

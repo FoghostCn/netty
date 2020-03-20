@@ -19,6 +19,8 @@ import java.net.SocketAddress;
 
 /**
  * {@link ChannelHandler} which will get notified for IO-outbound-operations.
+ * 主要用于用户直接发起的操作事件的传播，通过promise处理事件的成功与否，异常不会传播到pipeline上，read和flush除外(异常会传播到pipeline)
+ * 处理链条是沿着pipeline的tail到head
  */
 public interface ChannelOutboundHandler extends ChannelHandler {
     /**

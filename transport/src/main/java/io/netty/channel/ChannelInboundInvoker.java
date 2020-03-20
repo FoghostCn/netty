@@ -15,6 +15,10 @@
  */
 package io.netty.channel;
 
+/**
+ * 处理被动事件，主动事件是outbound
+ * 处理链条是pipeline的head到tail
+ */
 public interface ChannelInboundInvoker {
 
     /**

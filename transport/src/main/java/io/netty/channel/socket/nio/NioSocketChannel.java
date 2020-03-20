@@ -65,6 +65,10 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
              *  {@link SelectorProvider#provider()} which is called by each SocketChannel.open() otherwise.
              *
              *  See <a href="https://github.com/netty/netty/issues/2308">#2308</a>.
+             *
+             *  SelectorProvider#provider()方法存在同步代码块，每次new一个NioServerSocketChannel都要走一遍这个同步代码块会有大约
+             *  1%的性能损耗，所以这里改为了将SelectorProvider#provider()改为静态成员变量DEFAULT_SELECTOR_PROVIDER初始化的方式
+             *  其他的SelectableChannel也有同样的问题，详见{@link NioServerSocketChannel}、{@link NioDatagramChannel}
              */
             return provider.openSocketChannel();
         } catch (IOException e) {
@@ -332,6 +336,9 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
         }
     }
 
+    /**
+     * java 原生 NioSocketChannel不支持disconnect操作，这里直接转换为close操作
+     */
     @Override
     protected void doDisconnect() throws Exception {
         doClose();
@@ -381,6 +388,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
         int writeSpinCount = config().getWriteSpinCount();
         do {
             if (in.isEmpty()) {
+                // 无数据可写，清除OP_WRITE事件监听
                 // All written so clear OP_WRITE
                 clearOpWrite();
                 // Directly return here so incompleteWrite(...) is not called.

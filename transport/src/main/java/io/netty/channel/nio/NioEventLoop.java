@@ -66,6 +66,9 @@ public final class NioEventLoop extends SingleThreadEventLoop {
     private static final int MIN_PREMATURE_SELECTOR_RETURNS = 3;
     private static final int SELECTOR_AUTO_REBUILD_THRESHOLD;
 
+    /**
+     * 获取现在就绪的IO事件个数
+     */
     private final IntSupplier selectNowSupplier = new IntSupplier() {
         @Override
         public int get() throws Exception {
@@ -110,11 +113,20 @@ public final class NioEventLoop extends SingleThreadEventLoop {
 
     /**
      * The NIO {@link Selector}.
+     * 优化过的selector或者原始selector（优化逻辑执行失败时，此时和unwrappedSelector是同一个对象）
      */
     private Selector selector;
+    /**
+     * 原始jdk selector
+     */
     private Selector unwrappedSelector;
+    /**
+     * selectedKeys这个字段有值说明selector是优化了的，未优化时为null
+    */
     private SelectedSelectionKeySet selectedKeys;
-
+    /**
+     * {@link Selector#open()}方法内获取provider的逻辑中有同步代码块，这里直接缓存provider避免每次都走同步代码块
+     */
     private final SelectorProvider provider;
 
     private static final long AWAKE = -1L;
@@ -127,7 +139,9 @@ public final class NioEventLoop extends SingleThreadEventLoop {
     private final AtomicLong nextWakeupNanos = new AtomicLong(AWAKE);
 
     private final SelectStrategy selectStrategy;
-
+    /**
+     * IO时间占比
+     */
     private volatile int ioRatio = 50;
     private int cancelledKeys;
     private boolean needsToSelectAgain;
@@ -284,6 +298,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
      * Registers an arbitrary {@link SelectableChannel}, not necessarily created by Netty, to the {@link Selector}
      * of this event loop.  Once the specified {@link SelectableChannel} is registered, the specified {@code task} will
      * be executed by this event loop when the {@link SelectableChannel} is ready.
+     * 这个接口是给用netty的用户自定义扩展用的，netty本身并没有用到这个方法
      */
     public void register(final SelectableChannel ch, final int interestOps, final NioTask<?> task) {
         ObjectUtil.checkNotNull(ch, "ch");
@@ -440,7 +455,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                 try {
                     strategy = selectStrategy.calculateStrategy(selectNowSupplier, hasTasks());
                     switch (strategy) {
-                    case SelectStrategy.CONTINUE:
+                    case SelectStrategy.CONTINUE:// 这里不会被执行到
                         continue;
 
                     case SelectStrategy.BUSY_WAIT:
@@ -612,8 +627,10 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             i.remove();
 
             if (a instanceof AbstractNioChannel) {
+                // netty 自身绑定的处理逻辑
                 processSelectedKey(k, (AbstractNioChannel) a);
             } else {
+                // 用户自定义注册的channel处理逻辑
                 @SuppressWarnings("unchecked")
                 NioTask<SelectableChannel> task = (NioTask<SelectableChannel>) a;
                 processSelectedKey(k, task);
@@ -647,8 +664,10 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             final Object a = k.attachment();
 
             if (a instanceof AbstractNioChannel) {
+                // netty 自身绑定的处理逻辑
                 processSelectedKey(k, (AbstractNioChannel) a);
             } else {
+                // 用户自定义注册的channel处理逻辑
                 @SuppressWarnings("unchecked")
                 NioTask<SelectableChannel> task = (NioTask<SelectableChannel>) a;
                 processSelectedKey(k, task);
@@ -695,10 +714,11 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             if ((readyOps & SelectionKey.OP_CONNECT) != 0) {
                 // remove OP_CONNECT as otherwise Selector.select(..) will always return without blocking
                 // See https://github.com/netty/netty/issues/924
+                // server端新连接进来
                 int ops = k.interestOps();
                 ops &= ~SelectionKey.OP_CONNECT;
                 k.interestOps(ops);
-
+                // 这里的channel和unsafe不会是serverSocketChannel，对nio来说是socketChannel
                 unsafe.finishConnect();
             }
 
@@ -710,7 +730,9 @@ public final class NioEventLoop extends SingleThreadEventLoop {
 
             // Also check for readOps of 0 to workaround possible JDK bug which may otherwise lead
             // to a spin loop
+            // OP_ACCEPT也走unsafe.read方法，对于serverSocketChannel来说read就是接受新连接
             if ((readyOps & (SelectionKey.OP_READ | SelectionKey.OP_ACCEPT)) != 0 || readyOps == 0) {
+                // 如果是ACCEPT事件，这里的unsafe就是serverChannel的unsafe,
                 unsafe.read();
             }
         } catch (CancelledKeyException ignored) {
@@ -763,6 +785,9 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         }
     }
 
+    /**
+     * 对自定义任务的处理支持，取消注册到eventloop上的任务
+     */
     private static void invokeChannelUnregistered(NioTask<SelectableChannel> task, SelectionKey k, Throwable cause) {
         try {
             task.channelUnregistered(k.channel(), cause);

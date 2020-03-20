@@ -21,6 +21,10 @@ import io.netty.util.concurrent.FutureListener;
 import java.net.ConnectException;
 import java.net.SocketAddress;
 
+/**
+ * 这个接口主要是处理用户发起的操作
+ * 处理链条是沿着pipeline的tail到head
+ */
 public interface ChannelOutboundInvoker {
 
     /**

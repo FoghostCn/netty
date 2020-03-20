@@ -296,9 +296,15 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         }
     }
 
+    /**
+     * 初始化channel、pipeline、ChannelHandlerContext、Channel.unsafe
+     * serverbootstrap 和 客户端bootstrap 通过钩子函数init(Channel)实现不同初始化逻辑
+     */
     final ChannelFuture initAndRegister() {
         Channel channel = null;
         try {
+            // 利用Channel的无参构造器反射出实例，构造器中有初始化逻辑，初始化unsafe、pipeline(ChannelHandlerContext)
+            // 如：NioServerSocketChannel 初始化逻辑在AbstractChannel构造器中
             channel = channelFactory.newChannel();
             init(channel);
         } catch (Throwable t) {
